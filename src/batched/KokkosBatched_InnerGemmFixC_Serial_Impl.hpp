@@ -1127,12 +1127,13 @@ namespace KokkosBatched {
       const int
         i0 = 0*_as0,
         j0 = 0*_bs1;
-
-            
+      printf("I am here yeah\n");
+      printf("loop k = %d\n", k);
 #if defined(KOKKOS_ENABLE_PRAGMA_UNROLL)
 #pragma unroll
 #endif
       for (int p=0;p<k;++p) {
+        printf(" p = %d, k = %d, (p<k) = %d\n", p, k, int(p<k));
         a_0p = A[i0+p*_as1]; b_p0 = B[p*_bs0+j0];
         c_00 += a_0p * b_p0; 
       }
