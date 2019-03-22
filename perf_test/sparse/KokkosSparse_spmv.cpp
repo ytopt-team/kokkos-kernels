@@ -290,6 +290,7 @@ void print_help() {
   printf("Options:\n");
   printf("  -s [N]          : generate a semi-random banded (band size 0.01xN) NxN matrix\n");
   printf("                    with average of 10 entries per row.\n");
+  printf("  --nnz_per_row [K] : change the number of entries per row if used in conjunction with -s\n");
   printf("  --test [OPTION] : Use different kernel implementations\n");
   printf("                    Options:\n");
   printf("                      kk,kk-kernels          (Kokkos/Trilinos)\n");
@@ -327,6 +328,7 @@ int main(int argc, char **argv)
  int idx_offset = 0;
  int schedule=AUTO;
  int loop = 100;
+ int nnz_per_row = 10;
 
  if(argc == 1) {
    print_help();
@@ -380,6 +382,7 @@ int main(int argc, char **argv)
       schedule = STATIC;
     continue;
   }
+  if((strcmp(argv[i],"--nnz_per_row")==0)) {nnz_per_row=atoi(argv[++i]); continue;}
   if((strcmp(argv[i],"--help")==0) || (strcmp(argv[i],"-h")==0)) {
     print_help();
     return 0;
@@ -397,7 +400,7 @@ int main(int argc, char **argv)
 
  Kokkos::initialize(argc,argv);
 
- int total_errors = test_crs_matrix_singlevec<double>(size,size,size*10,test,filename,binaryfile,rows_per_thread,team_size,vector_length,idx_offset,schedule,loop);
+ int total_errors = test_crs_matrix_singlevec<double>(size,size,size*nnz_per_row,test,filename,binaryfile,rows_per_thread,team_size,vector_length,idx_offset,schedule,loop);
 
  if(total_errors == 0)
    printf("Kokkos::MultiVector Test: Passed\n");

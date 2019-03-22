@@ -224,9 +224,14 @@ int64_t spmv_launch_parameters(int64_t numRows, int64_t nnz, int64_t rows_per_th
 
   if(nnz_per_row < 1) nnz_per_row = 1;
 
+  int factor = 3;
+  #ifdef KOKKOS_ENABLE_KEPLER
+  factor = 6;
+  #endif
+
   if(vector_length < 1) {
     vector_length = 1;
-    while(vector_length<32 && vector_length*6 < nnz_per_row)
+    while(vector_length<32 && vector_length*factor < nnz_per_row)
       vector_length*=2;
   }
 
