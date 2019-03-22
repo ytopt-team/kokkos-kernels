@@ -8,6 +8,7 @@ KOKKOS_ARCH = "SNB,Kepler35"
 BUILD_KK_KERNELS = 1
 BUILD_CUSPARSE = 0
 BUILD_MKL = 0
+BUILD_NO_INSTALL = 1
 
 #Path settings
 KOKKOS_PATH = ${HOME}/Kokkos/kokkos
@@ -21,8 +22,8 @@ KOKKOS_KERNELS_INSTALL_PATH = ${HOME}/Kokkos/kokkos-kernels-install
 MKL_PATH=${SEMS_INTEL_ROOT}/mkl
 MKL_LIBS=-L${MKL_PATH}/lib/intel64 -lmkl_intel_lp64 -lmkl_intel_thread -lmkl_core
 
-SRC = ${KOKKOS_KERNELS_SRC_PATH}/perf_test/spmv/test_crsmatrix.cpp 
-HEADERS = $(wildcard ${KOKKOS_KERNELS_SRC_PATH}/perf_test/spmv/*.hpp) 
+SRC = ${KOKKOS_KERNELS_SRC_PATH}/perf_test/sparse/KokkosSparse_spmv.cpp 
+HEADERS = $(wildcard ${KOKKOS_KERNELS_SRC_PATH}/perf_test/sparse/spmv/*.hpp) 
 
 default: build
 	echo "Start Build"
@@ -32,12 +33,12 @@ config_headers:
 	touch KokkosKernels_config.h
 
 
-CXXFLAGS = -DMAKE_BUILD -g -O3 -I./converter -I./ -I${KOKKOS_KERNELS_SRC_PATH}/perf_test/spmv -I${KOKKOS_KERNELS_INSTALL_PATH}/include
+CXXFLAGS = -DMAKE_BUILD -g -O3 -I./converter -I./ -I${KOKKOS_KERNELS_SRC_PATH}/perf_test/sparse -I${KOKKOS_KERNELS_SRC_PATH}/perf_test/sparse/spmv -I${KOKKOS_KERNELS_INSTALL_PATH}/include
 LINKFLAGS = -O3
-LIB = ${KOKKOS_KERNELS_INSTALL_PATH}/lib/libkokkos_kernels.a 
+LIB = 
 
 ifneq (,$(findstring Cuda,$(KOKKOS_DEVICES)))
-CXX = ${KOKKOS_PATH}/config/nvcc_wrapper
+CXX = ${KOKKOS_PATH}/bin/nvcc_wrapper
 EXE = test_matvec.cuda
 else
 CXX = g++
@@ -46,6 +47,19 @@ endif
 
 LINK = ${CXX}
 
+ifeq (${BUILD_NO_INSTALL}, 1)
+  KOKKOSKERNELS_SCALARS =
+  include ${KOKKOS_KERNELS_SRC_PATH}/Makefile.kokkos-kernels
+  CXXFLAGS += $(KOKKOSKERNELS_CPPFLAGS) 
+  #LIB += $(KOKKOSKERNELS_LIBS)
+else
+  include $(KOKKOS_PATH)/Makefile.kokkos
+  LIB += ${KOKKOS_KERNELS_INSTALL_PATH}/lib/libkokkos_kernels.a
+endif
+
+ifeq (${BUILD_KK_KERNELS}, 1)
+CXXFLAGS += -DHAVE_KK_KERNELS
+endif
 ifeq (${BUILD_MKL}, 1)
 CXXFLAGS += -I${MKL_PATH}/include -DHAVE_MKL -mkl
 LIB += ${MKL_LIBS} -mkl
@@ -63,7 +77,6 @@ DEPFLAGS = -M
 SRC_NODIR = $(notdir $(SRC))
 OBJ = $(SRC_NODIR:.cpp=.o)
 
-include $(KOKKOS_PATH)/Makefile.kokkos
 
 build: $(EXE)
 
