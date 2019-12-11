@@ -136,6 +136,80 @@ inline int kk_get_suggested_team_size(const int vector_size, const ExecSpaceType
   }
 }
 
+//CUDA Graph support:
+#if defined(KOKKOS_ENABLE_CUDA) && 10000 < CUDA_VERSION
+#define HAVE_CUDAGRAPHS
+
+struct CudaGraphWrapper
+{
+  cudaGraph_t graph;
+  cudaGraphExec_t instance;
+  cudaStream_t stream;
+
+  using P = Kokkos::Experimental::WorkItemProperty::HintLightWeight;
+  using WrappedTeamPolicy =
+    typename Kokkos::Impl::PolicyPropertyAdaptor<WorkItemProperty::ImplWorkItemProperty<P>,
+             Kokkos::TeamPolicy<Kokkos::Cuda>>::policy_out_t>;
+  using WrappedRangePolicy =
+    typename Kokkos::Impl::PolicyPropertyAdaptor<WorkItemProperty::ImplWorkItemProperty<P>,
+             Kokkos::RangePolicy<Kokkos::Cuda>>::policy_out_t>;
+
+  CudaGraphWrapper()
+  {
+    cudaStreamCreate(&stream);
+  }
+
+  ~CudaGraphWrapper()
+  {
+    cudaStreamDestroy(stream);
+  }
+
+  void begin_recording()
+  {
+    cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
+  }
+
+  void end_recording()
+  {
+    cudaStreamEndCapture(stream, &graph);
+    cudaGraphInstantiate(&instance, graph, NULL, NULL, 0);
+  }
+
+  WrappedTeamPolicy team_policy(size_t num_teams, size_t team_size)
+  {
+    return Kokkos::Experimental::require(Kokkos::TeamPolicy<Kokkos::Cuda>(stream, num_teams, team_size), P);
+  }
+
+  WrappedTeamPolicy team_policy(size_t num_teams, size_t team_size, size_t vector_size)
+  {
+    return Kokkos::Experimental::require(Kokkos::TeamPolicy<Kokkos::Cuda>(stream, num_teams, team_size, vector_size), P);
+  }
+
+  WrappedTeamPolicy team_policy(size_t num_teams, size_t team_size, size_t vector_size, size_t sharedPerTeam, size_t sharedPerThread)
+  {
+    return Kokkos::Experimental::require(Kokkos::TeamPolicy<Kokkos::Cuda>(stream, num_teams, team_size), P);
+  }
+
+  WrappedRangePolicy range_policy(size_t len)
+  {
+    return Kokkos::Experimental::require(Kokkos::RangePolicy<Kokkos::Cuda>(stream, 0, len), P);
+  }
+
+  WrappedRangePolicy range_policy(size_t begin, size_t end)
+  {
+    return Kokkos::Experimental::require(Kokkos::RangePolicy<Kokkos::Cuda>(stream, begin, end), P);
+  }
+
+  //Actually execute all the kernels in the graph
+  void launch()
+  {
+    cudaGraphLaunch(instance, stream);
+    cudaStreamSynchronize(stream);
+  }
+};
+
+#endif  //HAVE_CUDAGRAPHS
+
 }
 }
 
