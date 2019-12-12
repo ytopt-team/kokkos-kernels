@@ -136,12 +136,93 @@ inline int kk_get_suggested_team_size(const int vector_size, const ExecSpaceType
   }
 }
 
-//CUDA Graph support:
+/*
+ * CUDA 10.1 graph support. Currently, only supports a linear sequence of kernels.
+ * The first definition below is actually a fake wrapper with an identical interface,
+ * so that user code for launching kernels only needs to be written once.
+ *
+ * The second definition is used if the CUDA version supports graphs and the ExecSpace is Cuda.
+ *
+ * TODO: provide full CUDA graph support, with arbitrary dependencies involing multiple streams, kernels and memcpys.
+*/
+
+template<typename ExecSpace, typename LaunchParams>
+struct CudaGraphWrapper
+{
+  CudaGraphWrapper(const CudaGraphWrapper&) = delete;
+
+  //Overload that constructs the params
+  template<class... Args>
+  bool begin_recording(Args&&... args)
+  {
+    return begin_recording(LaunchParams(args));
+  }
+
+  bool begin_recording(const LaunchParams&)
+  {
+    //The fake wrapper always re-records, since recording here actually launches the kernels.
+    //Even though it's not strictly necessary, keep track of "recording" to catch
+    //some simple errors without needing to test with CUDA 10.1.
+    if(recording)
+      throw std::runtime_error("CudaGraphWrapper: already recording; can't call begin_recording() again");
+    return true;
+  }
+
+  void end_recording()
+  {
+    if(!recording)
+      throw std::runtime_error("CudaGraphWrapper: not currently recording, so can't call end_recording()");
+    recording = false;
+  }
+
+  template<typename Tag = void>
+  WrappedTeamPolicy team_policy(size_t num_teams, size_t team_size)
+  {
+    if(!recording)
+      throw std::runtime_error("CudaGraphWrapper: Can't create TeamPolicy because begin_recording() has not been called");
+    return Kokkos::TeamPolicy<ExecSpace, Tag>(stream, num_teams, team_size);
+  }
+
+  template<typename Tag = void>
+  WrappedTeamPolicy team_policy(size_t num_teams, size_t team_size, size_t vector_size)
+  {
+    if(!recording)
+      throw std::runtime_error("CudaGraphWrapper: Can't create TeamPolicy because begin_recording() has not been called");
+    return Kokkos::TeamPolicy<ExecSpace, Tag>(stream, num_teams, team_size, vector_size);
+  }
+
+  template<typename Tag = void>
+  WrappedTeamPolicy team_policy(size_t num_teams, size_t team_size, size_t vector_size, size_t sharedPerTeam, size_t sharedPerThread)
+  {
+    if(!recording)
+      throw std::runtime_error("CudaGraphWrapper: Can't create TeamPolicy because begin_recording() has not been called");
+    return Kokkos::TeamPolicy<ExecSpace, Tag>(stream, num_teams, team_size).set_scratch_size(0, sharedPerTeam, sharedPerThread);
+  }
+
+  template<typename Tag = void>
+  WrappedRangePolicy range_policy(size_t begin, size_t end)
+  {
+    if(!recording)
+      throw std::runtime_error("CudaGraphWrapper: Can't create RangePolicy because begin_recording() has not been called");
+    return Kokkos::RangePolicy<ExecSpace, Tag>(stream, begin, end);
+  }
+
+  void launch() {
+    // The kernels were executed during recording, but fence now
+    ExecSpace().fence();
+  }
+
+  bool recording = false;
+};
+
 #if defined(KOKKOS_ENABLE_CUDA) && 10000 < CUDA_VERSION
 #define HAVE_CUDAGRAPHS
 
-struct CudaGraphWrapper
+//Specialize the wrapper for Cuda, to actually use the graph features.
+template<typename LaunchParams>
+struct CudaGraphWrapper<Kokkos::Cuda, LaunchParams>
 {
+  //The class assumes these are 
   cudaGraph_t graph;
   cudaGraphExec_t instance;
   cudaStream_t stream;
@@ -157,55 +238,92 @@ struct CudaGraphWrapper
   CudaGraphWrapper()
   {
     cudaStreamCreate(&stream);
+    graphReady = false;
+    recording = false;
   }
+
+  //Don't want to be able to copy this wrapper, because then ownership of the stream gets tricky.
+  //Just have one owner and pass around a pointer.
+  CudaGraphWrapper(const CudaGraphWrapper&) = delete;
 
   ~CudaGraphWrapper()
   {
     cudaStreamDestroy(stream);
   }
 
-  void begin_recording()
+  //Overload that constructs the params
+  template<class... Args>
+  bool begin_recording(Args&&... args)
   {
+    return begin_recording(LaunchParams(args));
+  }
+
+  bool begin_recording(const LaunchParams& params)
+  {
+    if(graphReady && params == currentParams)
+      return false;
+    //Otherwise, need to re-record (or record for the first time)
+    currentParams = params;
+    graphReady = false;
+    recording = true;
     cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
+    return true;
   }
 
   void end_recording()
   {
     cudaStreamEndCapture(stream, &graph);
     cudaGraphInstantiate(&instance, graph, NULL, NULL, 0);
+    graphReady = true;
+    recording = false;
   }
 
+  template<typename Tag = void>
   WrappedTeamPolicy team_policy(size_t num_teams, size_t team_size)
   {
-    return Kokkos::Experimental::require(Kokkos::TeamPolicy<Kokkos::Cuda>(stream, num_teams, team_size), P);
+    if(!recording)
+      throw std::runtime_error("CudaGraphWrapper: Can't create TeamPolicy because begin_recording() has not been called");
+    return Kokkos::Experimental::require(Kokkos::TeamPolicy<Kokkos::Cuda, Tag>(stream, num_teams, team_size), P);
   }
 
+  template<typename Tag = void>
   WrappedTeamPolicy team_policy(size_t num_teams, size_t team_size, size_t vector_size)
   {
-    return Kokkos::Experimental::require(Kokkos::TeamPolicy<Kokkos::Cuda>(stream, num_teams, team_size, vector_size), P);
+    if(!recording)
+      throw std::runtime_error("CudaGraphWrapper: Can't create TeamPolicy because begin_recording() has not been called");
+    return Kokkos::Experimental::require(Kokkos::TeamPolicy<Kokkos::Cuda, Tag>(stream, num_teams, team_size, vector_size), P);
   }
 
+  template<typename Tag = void>
   WrappedTeamPolicy team_policy(size_t num_teams, size_t team_size, size_t vector_size, size_t sharedPerTeam, size_t sharedPerThread)
   {
-    return Kokkos::Experimental::require(Kokkos::TeamPolicy<Kokkos::Cuda>(stream, num_teams, team_size), P);
+    if(!recording)
+      throw std::runtime_error("CudaGraphWrapper: Can't create TeamPolicy because begin_recording() has not been called");
+    return Kokkos::Experimental::require(Kokkos::TeamPolicy<Kokkos::Cuda, Tag>(stream, num_teams, team_size).set_scratch_size(0, sharedPerTeam, sharedPerThread), P);
   }
 
-  WrappedRangePolicy range_policy(size_t len)
-  {
-    return Kokkos::Experimental::require(Kokkos::RangePolicy<Kokkos::Cuda>(stream, 0, len), P);
-  }
-
+  template<typename Tag = void>
   WrappedRangePolicy range_policy(size_t begin, size_t end)
   {
-    return Kokkos::Experimental::require(Kokkos::RangePolicy<Kokkos::Cuda>(stream, begin, end), P);
+    if(!recording)
+      throw std::runtime_error("CudaGraphWrapper: Can't create RangePolicy because begin_recording() has not been called");
+    return Kokkos::Experimental::require(Kokkos::RangePolicy<Kokkos::Cuda, Tag>(stream, begin, end), P);
   }
 
   //Actually execute all the kernels in the graph
   void launch()
   {
+    if(recording)
+      throw std::runtime_error("Can't launch CUDA graph while recording kernel launches - call end_recording() first");
+    else if(!graphReady)
+      throw std::runtime_error("Can't launch CUDA graph: kernels have not been recorded yet.");
     cudaGraphLaunch(instance, stream);
     cudaStreamSynchronize(stream);
   }
+
+  bool recording;
+  bool graphReady;
+  LaunchParams currentParams;
 };
 
 #endif  //HAVE_CUDAGRAPHS

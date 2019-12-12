@@ -44,6 +44,7 @@
 #include <Kokkos_MemoryTraits.hpp>
 #include <Kokkos_Core.hpp>
 #include <KokkosKernels_Utils.hpp>
+#include <KokkosKernels_ExecSpaceUtils.hpp>
 #ifndef _GAUSSSEIDELHANDLE_HPP
 #define _GAUSSSEIDELHANDLE_HPP
 //#define VERBOSE
@@ -69,6 +70,71 @@ namespace KokkosSparse{
     }
     return "INVALID CLUSTERING ALGORITHM";
   }
+
+  //Stuff for working with Cuda graphs
+  enum ViewLayout
+  {
+    LEFT,
+    RIGHT
+  }
+
+  //To re-use a CudaGraph between apply() calls, must be able to compare the X and Y
+  //views to see if they match the one that was used when recording the CudaGraph. 
+  //ViewInfo2D provides a type-generic way to store and compare rank-2 views.
+  struct ViewInfo2D
+  {
+    ViewInfo2D()
+      : ptr(nullptr), extent0(0), extent1(0), layout(LEFT)
+    {}
+    template<typename View>
+    ViewInfo2D(const View& v)
+    {
+      static_assert(std::is_same<View::rank, 2>::value, "ViewInfo2D passed a view with dimension other than 2");
+      static_assert(
+          std::is_same<View::array_layout, Kokkos::LayoutLeft>::value ||
+          std::is_same<View::array_layout, Kokkos::LayoutRight>::value,
+          "ViewInfo2D and Gauss-Seidel only support vector layouts Left and Right");
+      ptr = v.data();
+      extent0 = v.extent(0);
+      extent1 = v.extent(1);
+      if(std::is_same<View::array_layout, Kokkos::LayoutLeft>::value)
+        layout = LEFT;
+      else
+        layout = RIGHT;
+    }
+    bool operator==(const ViewInfo2D& other)
+    {
+      return ptr == other.ptr &&
+        extent0 == other.extent0 &&
+        extent1 == other.extent1 &&
+        layout == other.layout;
+    }
+    void* ptr;
+    size_t extent0;
+    size_t extent1;
+    int layout;
+  };
+
+  struct ApplyLaunchParams
+  {
+    template<typename XView, typename YView>
+    ApplyLaunchParams(const XView& x_, const YView& y_, bool forward_, bool backward_, int iters_)
+      : x(x_), y(y_), forward(forward_), backward(backward_), iters(iters_)
+    {}
+    bool operator==(const ApplyLaunchParams& other)
+    {
+      return x == other.x &&
+        y == other.y &&
+        forward == other.forward &&
+        backward == other.backward &&
+        iters == other.iters;
+    }
+    ViewInfo2D x;
+    ViewInfo2D y;
+    bool forward;
+    bool backward;
+    int iters;
+  };
 
   template <class size_type_, class lno_t_, class scalar_t_,
             class ExecutionSpace,
@@ -102,6 +168,7 @@ namespace KokkosSparse{
     typedef typename Kokkos::View<nnz_lno_t *, HandlePersistentMemorySpace> nnz_lno_persistent_work_view_t;
     typedef typename nnz_lno_persistent_work_view_t::HostMirror nnz_lno_persistent_work_host_view_t; //Host view type
 
+    using KokkosKernels::Impl::CudaGraphWrapper;
 
   protected:
     GSAlgorithm algorithm_type;
@@ -116,6 +183,19 @@ namespace KokkosSparse{
     int suggested_vector_size;
     int suggested_team_size;
 
+  private:
+    //CUDA graph that batches the entire apply(), removing most of the
+    //kernel launch overhead. Requires CUDA >= 10.1 (HAVE_CUDAGRAPH implies this).
+    //
+    //Will be reused on subsequent apply() calls, if the ApplyLaunchParameters are the same.
+    // * symbolic/numeric aren't called again
+    // * X/Y are the same views (pointer, layout, extent).
+    //   cudaGraphX and cudaGraphY are used to check this.
+    // * the direction (forward/backward/symmetric) is the same.
+    // * the iteration count is the same.
+    using CudaGraphType = CudaGraphWrapper<ExecutionSpace, ApplyLaunchParams>;
+    CudaGraphType applyCudaGraph;
+
   public:
 
     /**
@@ -125,10 +205,8 @@ namespace KokkosSparse{
       algorithm_type(gs),
       color_xadj(), color_adj(), numColors(0),
       called_symbolic(false), called_numeric(false),
-      suggested_vector_size(0), suggested_team_size(0)
+      suggested_vector_size(0), suggested_team_size(0),
     {}
-
-    virtual ~GaussSeidelHandle() = default;
 
     //getters
     GSAlgorithm get_algorithm_type() const {return this->algorithm_type;}
@@ -173,6 +251,10 @@ namespace KokkosSparse{
     }
     void set_num_colors(const nnz_lno_t &numColors_) {
       this->numColors = numColors_;
+    }
+
+    CudaGraphType& get_apply_cuda_graph() {
+      return applyCudaGraph;
     }
 
     void vector_team_size(
@@ -566,33 +648,32 @@ namespace KokkosSparse{
     
     bool use_teams() const
     {
-      bool return_value = false;
 #if defined( KOKKOS_ENABLE_SERIAL )
       if (Kokkos::Impl::is_same< Kokkos::Serial , ExecutionSpace >::value) {
-        return_value = false;
+        return false;
       }
 #endif
 #if defined( KOKKOS_ENABLE_THREADS )
       if (Kokkos::Impl::is_same< Kokkos::Threads , ExecutionSpace >::value){
-        return_value = false;
+        return false;
       }
 #endif
 #if defined( KOKKOS_ENABLE_OPENMP )
       if (Kokkos::Impl::is_same< Kokkos::OpenMP, ExecutionSpace >::value){
-        return_value = false;
+        return false;
       }
 #endif
 #if defined( KOKKOS_ENABLE_CUDA )
       if (Kokkos::Impl::is_same<Kokkos::Cuda, ExecutionSpace >::value){
-        return_value = true;
+        return true;
       }
 #endif
 #if defined( KOKKOS_ENABLE_QTHREAD)
       if (Kokkos::Impl::is_same< Kokkos::Qthread, ExecutionSpace >::value){
-        return_value = false;
+        return false;
       }
 #endif
-      return return_value;
+      return false;
     }
 
     ~ClusterGaussSeidelHandle() = default;
