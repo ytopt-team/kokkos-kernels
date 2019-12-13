@@ -71,33 +71,31 @@ namespace KokkosSparse{
     return "INVALID CLUSTERING ALGORITHM";
   }
 
-  //Stuff for working with Cuda graphs
-  enum ViewLayout
-  {
-    LEFT,
-    RIGHT
-  }
-
   //To re-use a CudaGraph between apply() calls, must be able to compare the X and Y
   //views to see if they match the one that was used when recording the CudaGraph. 
   //ViewInfo2D provides a type-generic way to store and compare rank-2 views.
   struct ViewInfo2D
   {
+    enum ViewLayout
+    {
+      LEFT,
+      RIGHT
+    };
     ViewInfo2D()
       : ptr(nullptr), extent0(0), extent1(0), layout(LEFT)
     {}
     template<typename View>
     ViewInfo2D(const View& v)
     {
-      static_assert(std::is_same<View::rank, 2>::value, "ViewInfo2D passed a view with dimension other than 2");
+      static_assert(View::rank == 2, "ViewInfo2D passed a view with dimension other than 2");
       static_assert(
-          std::is_same<View::array_layout, Kokkos::LayoutLeft>::value ||
-          std::is_same<View::array_layout, Kokkos::LayoutRight>::value,
+          std::is_same<typename View::array_layout, Kokkos::LayoutLeft>::value ||
+          std::is_same<typename View::array_layout, Kokkos::LayoutRight>::value,
           "ViewInfo2D and Gauss-Seidel only support vector layouts Left and Right");
-      ptr = v.data();
+      ptr = (const void*) v.data();
       extent0 = v.extent(0);
       extent1 = v.extent(1);
-      if(std::is_same<View::array_layout, Kokkos::LayoutLeft>::value)
+      if(std::is_same<typename View::array_layout, Kokkos::LayoutLeft>::value)
         layout = LEFT;
       else
         layout = RIGHT;
@@ -109,7 +107,7 @@ namespace KokkosSparse{
         extent1 == other.extent1 &&
         layout == other.layout;
     }
-    void* ptr;
+    const void* ptr;
     size_t extent0;
     size_t extent1;
     int layout;
@@ -168,8 +166,6 @@ namespace KokkosSparse{
     typedef typename Kokkos::View<nnz_lno_t *, HandlePersistentMemorySpace> nnz_lno_persistent_work_view_t;
     typedef typename nnz_lno_persistent_work_view_t::HostMirror nnz_lno_persistent_work_host_view_t; //Host view type
 
-    using KokkosKernels::Impl::CudaGraphWrapper;
-
   protected:
     GSAlgorithm algorithm_type;
 
@@ -193,7 +189,7 @@ namespace KokkosSparse{
     //   cudaGraphX and cudaGraphY are used to check this.
     // * the direction (forward/backward/symmetric) is the same.
     // * the iteration count is the same.
-    using CudaGraphType = CudaGraphWrapper<ExecutionSpace, ApplyLaunchParams>;
+    using CudaGraphType = KokkosKernels::Impl::CudaGraphWrapper<ExecutionSpace, ApplyLaunchParams>;
     CudaGraphType applyCudaGraph;
 
   public:

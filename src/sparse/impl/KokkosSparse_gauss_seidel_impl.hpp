@@ -655,7 +655,6 @@ namespace KokkosSparse{
       void initialize_symbolic()
       {
         auto gsHandle = get_gs_handle();
-        gsHandle->clear_cuda_graph();
         typename HandleType::GraphColoringHandleType *gchandle = this->handle->get_graph_coloring_handle();
 
         if (gchandle == NULL)
@@ -1127,7 +1126,6 @@ namespace KokkosSparse{
         if (gsHandle->is_symbolic_called() == false){
           this->initialize_symbolic();
         }
-        gsHandle->clearCudaGraph();
 #ifdef KOKKOSSPARSE_IMPL_TIME_REVERSE
         Kokkos::Impl::Timer timer;
 #endif
@@ -1590,12 +1588,12 @@ namespace KokkosSparse{
                   }
                   else if (gs.num_max_vals_in_l2 == 0) {
                     Kokkos::parallel_for("KokkosSparse::GaussSeidel::BLOCK_Team_PSGS::backward",
-                                         cugraph.team_policy<BlockTag>(numTeams, suggested_team_size, vector_size),
+                                         cugraph.template team_policy<BlockTag>(numTeams, suggested_team_size, vector_size),
                                          gs);
                   }
                   else {
                     Kokkos::parallel_for("KokkosSparse::GaussSeidel::BIGBLOCK_Team_PSGS::backward",
-                                         cugraph.team_policy<BigBlockTag>(numTeams, suggested_team_size, vector_size),
+                                         cugraph.template team_policy<BigBlockTag>(numTeams, suggested_team_size, vector_size),
                                          gs);
                   }
                   if (i == 0){
@@ -1608,12 +1606,6 @@ namespace KokkosSparse{
           cugraph.end_recording();
         }
         cugraph.launch();
-      }
-
-      void DoPSGS(Team_PSGS &gs, color_t numColors, nnz_lno_persistent_work_host_view_t h_color_xadj,
-                  bool apply_forward,
-                  bool apply_backward){
-
       }
 
       void IterativePSGS(

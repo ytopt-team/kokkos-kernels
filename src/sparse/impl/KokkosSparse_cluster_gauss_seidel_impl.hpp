@@ -118,7 +118,7 @@ namespace KokkosSparse{
       //Get the specialized ClusterGaussSeidel handle from the main handle
       ClusterGaussSeidelHandle* get_gs_handle()
       {
-        GaussSeidelHandle* gsHandle = dynamic_cast<ClusterGaussSeidelHandle*>(this->handle->get_gs_handle());
+        ClusterGaussSeidelHandle* gsHandle = dynamic_cast<ClusterGaussSeidelHandle*>(this->handle->get_gs_handle());
         if(!gsHandle)
         {
           throw std::runtime_error("ClusterGaussSeidel: GS handle has not been created, or is set up for Point GS.");
@@ -1174,7 +1174,7 @@ namespace KokkosSparse{
                   gs._color_set_begin = color_index_begin;
                   gs._color_set_end = color_index_end;
                   Kokkos::parallel_for("KokkosSparse::GaussSeidel::Team_PSGS::forward",
-                                       cugraph->team_policy((overall_work + gs._clusters_per_team - 1) / gs._clusters_per_team, team_size, vec_size),
+                                       cugraph.team_policy((overall_work + gs._clusters_per_team - 1) / gs._clusters_per_team, team_size, vec_size),
                                        gs);
                   if (i == 0){
                     break;
@@ -1212,7 +1212,7 @@ namespace KokkosSparse{
                 gs._color_set_begin = color_index_begin;
                 gs._color_set_end = color_index_end;
                 Kokkos::parallel_for ("KokkosSparse::GaussSeidel::PSGS::forward",
-                    cugraph.range_policy<PSGS_ForwardTag>
+                    cugraph.template range_policy<PSGS_ForwardTag>
                     (0, color_index_end - color_index_begin), gs);
               }
             }
@@ -1225,7 +1225,7 @@ namespace KokkosSparse{
                 gs._color_set_begin = color_index_begin;
                 gs._color_set_end = color_index_end;
                 Kokkos::parallel_for ("KokkosSparse::GaussSeidel::PSGS::backward",
-                    cugraph.range_policy<PSGS_BackwardTag>
+                    cugraph.template range_policy<PSGS_BackwardTag>
                     (0, color_index_end - color_index_begin), gs);
                 if (i == 0){
                   break;
