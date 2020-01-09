@@ -54,6 +54,7 @@
 #include "KokkosGraph_Distance1Color.hpp"
 #include "KokkosKernels_Uniform_Initialized_MemoryPool.hpp"
 #include "KokkosKernels_BitUtils.hpp"
+#include "KokkosKernels_ExecSpaceUtils.hpp"
 #include "KokkosKernels_SimpleUtils.hpp"
 
 //FOR DEBUGGING
@@ -1542,17 +1543,17 @@ namespace KokkosSparse{
         nnz_lno_t suggested_team_size = gs.suggested_team_size;
         nnz_lno_t team_row_chunk_size = gs.team_work_size;
         int vector_size = gs.vector_size;
-        nnz_lno_t block_size = get_gs_handle()->get_block_size();
-        PointGaussSeidelHandle* handle = get_gs_handle();
-        auto& cugraph = handle->get_apply_cuda_graph();
+        PointGaussSeidelHandle* h = get_gs_handle();
+        nnz_lno_t block_size = h->get_block_size();
+        auto& cugraph = h->get_apply_cuda_graph();
         if(cugraph.begin_recording(gs._Xvector, gs._Yvector, num_iteration, apply_forward, apply_backward)) {
-          for (int i = 0; i < num_iteration; ++i) {
+          for (int iter = 0; iter < num_iteration; iter++) {
             if (apply_forward) {
               gs.is_backward = false;
-              for (color_t i = 0; i < numColors; ++i) {
-                nnz_lno_t color_index_begin = h_color_xadj(i);
-                nnz_lno_t color_index_end = h_color_xadj(i + 1);
-                int overall_work = color_index_end - color_index_begin;// /256 + 1;
+              for (color_t c = 0; c < numColors; c++) {
+                nnz_lno_t color_index_begin = h_color_xadj(c);
+                nnz_lno_t color_index_end = h_color_xadj(c + 1);
+                nnz_lno_t overall_work = color_index_end - color_index_begin;
                 gs._color_set_begin = color_index_begin;
                 gs._color_set_end = color_index_end;
                 int numTeams = (overall_work + team_row_chunk_size - 1) / team_row_chunk_size;
@@ -1562,12 +1563,12 @@ namespace KokkosSparse{
                                        gs);
                 } else if (gs.num_max_vals_in_l2 == 0) {
                   Kokkos::parallel_for("KokkosSparse::GaussSeidel::BLOCK_Team_PSGS::forward",
-                                       cugraph.team_policy<BlockTag>(numTeams, suggested_team_size, vector_size),
+                                       cugraph.template team_policy<BlockTag>(numTeams, suggested_team_size, vector_size),
                                        gs);
                 }
                 else {
                   Kokkos::parallel_for("KokkosSparse::GaussSeidel::BIGBLOCK_Team_PSGS::forward",
-                                       cugraph.team_policy<BigBlockTag>(numTeams, suggested_team_size, vector_size),
+                                       cugraph.template team_policy<BigBlockTag>(numTeams, suggested_team_size, vector_size),
                                        gs);
                 }
               }
@@ -1575,9 +1576,10 @@ namespace KokkosSparse{
             if (apply_backward) {
               gs.is_backward = true;
               if (numColors > 0) {
-                for (color_t i = numColors - 1;  ; --i) {
-                  nnz_lno_t color_index_begin = h_color_xadj(i);
-                  nnz_lno_t color_index_end = h_color_xadj(i + 1);
+                for (color_t c = numColors - 1;  ; --c) {
+                  nnz_lno_t color_index_begin = h_color_xadj(c);
+                  nnz_lno_t color_index_end = h_color_xadj(c + 1);
+                  nnz_lno_t overall_work = color_index_end - color_index_begin;
                   int numTeams = (overall_work + team_row_chunk_size - 1) / team_row_chunk_size;
                   gs._color_set_begin = color_index_begin;
                   gs._color_set_end = color_index_end;
@@ -1596,7 +1598,7 @@ namespace KokkosSparse{
                                          cugraph.template team_policy<BigBlockTag>(numTeams, suggested_team_size, vector_size),
                                          gs);
                   }
-                  if (i == 0){
+                  if (c == 0){
                     break;
                   }
                 }
@@ -1616,25 +1618,24 @@ namespace KokkosSparse{
                          bool apply_forward,
                          bool apply_backward)
       {
-        PointGaussSeidelHandle* handle = get_gs_handle();
-        auto& cugraph = handle->get_apply_cuda_graph();
+        auto& cugraph = get_gs_handle()->get_apply_cuda_graph();
         if(cugraph.begin_recording(gs._Xvector, gs._Yvector, num_iteration, apply_forward, apply_backward)) {
-          for (int i = 0; i < num_iteration; ++i) {
+          for (int iter = 0; iter < num_iteration; iter++) {
             if (apply_forward){
-              for (color_t i = 0; i < numColors; ++i) {
-                nnz_lno_t color_index_begin = h_color_xadj(i);
-                nnz_lno_t color_index_end = h_color_xadj(i + 1);
+              for (color_t c = 0; c < numColors; c++) {
+                nnz_lno_t color_index_begin = h_color_xadj(c);
+                nnz_lno_t color_index_end = h_color_xadj(c + 1);
                 Kokkos::parallel_for ("KokkosSparse::GaussSeidel::PSGS::forward",
                                       cugraph.range_policy(color_index_begin, color_index_end), gs);
               }
             }
             if (apply_backward && numColors) {
-              for (size_type i = numColors - 1; ; --i){
-                nnz_lno_t color_index_begin = h_color_xadj(i);
-                nnz_lno_t color_index_end = h_color_xadj(i + 1);
+              for (size_type c = numColors - 1; ; c--){
+                nnz_lno_t color_index_begin = h_color_xadj(c);
+                nnz_lno_t color_index_end = h_color_xadj(c + 1);
                 Kokkos::parallel_for ("KokkosSparse::GaussSeidel::PSGS::backward",
                                       cugraph.range_policy(color_index_begin, color_index_end), gs);
-                if (i == 0){
+                if (c == 0){
                   break;
                 }
               }

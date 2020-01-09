@@ -115,6 +115,9 @@ namespace KokkosSparse{
 
   struct ApplyLaunchParams
   {
+    ApplyLaunchParams()
+    {}
+
     template<typename XView, typename YView>
     ApplyLaunchParams(const XView& x_, const YView& y_, bool forward_, bool backward_, int iters_)
       : x(x_), y(y_), forward(forward_), backward(backward_), iters(iters_)
@@ -201,8 +204,10 @@ namespace KokkosSparse{
       algorithm_type(gs),
       color_xadj(), color_adj(), numColors(0),
       called_symbolic(false), called_numeric(false),
-      suggested_vector_size(0), suggested_team_size(0),
+      suggested_vector_size(0), suggested_team_size(0)
     {}
+
+    virtual ~GaussSeidelHandle() {}
 
     //getters
     GSAlgorithm get_algorithm_type() const {return this->algorithm_type;}

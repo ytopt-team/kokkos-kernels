@@ -150,6 +150,11 @@ inline int kk_get_suggested_team_size(const int vector_size, const ExecSpaceType
 template<typename ExecSpace, typename LaunchParams>
 struct CudaGraphWrapper
 {
+  //No actual members, so nothing to construct
+  CudaGraphWrapper() {}
+
+  //Not allowing copy-ctor because the actual
+  //CUDA graph specialization below can't support it
   CudaGraphWrapper(const CudaGraphWrapper&) = delete;
 
   //Overload that constructs the params
@@ -219,6 +224,20 @@ struct CudaGraphWrapper
 #if defined(KOKKOS_ENABLE_CUDA) && 10000 < CUDA_VERSION
 #define HAVE_CUDAGRAPHS
 
+//Dummy parallel call that makes compiler generate some declarations/initializations
+//necessary for CUDA graph stream capture to work (see Kokkos issue #2606)
+namespace Dummy
+{
+  struct F
+  {
+    KOKKOS_INLINE_FUNCTION void operator()(const int) const {}
+  };
+  inline void f()
+  {
+    Kokkos::parallel_for(Kokkos::RangePolicy<Kokkos::Cuda>(0,1), F());
+  }
+}
+
 //Specialize the wrapper for Cuda, to actually use the graph features.
 template<typename LaunchParams>
 struct CudaGraphWrapper<Kokkos::Cuda, LaunchParams>
@@ -267,6 +286,7 @@ struct CudaGraphWrapper<Kokkos::Cuda, LaunchParams>
   {
     if(graphReady && params == currentParams)
       return false;
+    std::cout << "Recording a new CUDA graph.\n";
     //Otherwise, need to re-record (or record for the first time)
     currentParams = params;
     graphReady = false;

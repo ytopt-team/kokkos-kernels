@@ -1145,16 +1145,15 @@ namespace KokkosSparse{
           bool apply_forward,
           bool apply_backward)
       {
-        ClusterGaussSeidelHandle* handle = get_gs_handle();
-        auto& cugraph = handle->get_apply_cuda_graph();
+        auto& cugraph = get_gs_handle()->get_apply_cuda_graph();
         if(cugraph.begin_recording(gs._Xvector, gs._Yvector, num_iteration, apply_forward, apply_backward)) {
-          for (int i = 0; i < num_iteration; ++i) {
+          for (int iter = 0; iter < num_iteration; iter++) {
             if (apply_forward) {
               gs._is_backward = false;
-              for (color_t i = 0; i < numColors; ++i) {
-                nnz_lno_t color_index_begin = h_color_xadj(i);
-                nnz_lno_t color_index_end = h_color_xadj(i + 1);
-                int overall_work = color_index_end - color_index_begin;// /256 + 1;
+              for (color_t c = 0; c < numColors; c++) {
+                nnz_lno_t color_index_begin = h_color_xadj(c);
+                nnz_lno_t color_index_end = h_color_xadj(c + 1);
+                nnz_lno_t overall_work = color_index_end - color_index_begin;
                 gs._color_set_begin = color_index_begin;
                 gs._color_set_end = color_index_end;
                 Kokkos::parallel_for("KokkosSparse::GaussSeidel::Team_PSGS::forward",
@@ -1167,16 +1166,16 @@ namespace KokkosSparse{
               gs._is_backward = true;
               if (numColors > 0)
               {
-                for (color_t i = numColors - 1; ; --i) {
-                  nnz_lno_t color_index_begin = h_color_xadj(i);
-                  nnz_lno_t color_index_end = h_color_xadj(i + 1);
-                  nnz_lno_t overall_work = color_index_end - color_index_begin;// /256 + 1;
+                for (color_t c = numColors - 1; ; c--) {
+                  nnz_lno_t color_index_begin = h_color_xadj(c);
+                  nnz_lno_t color_index_end = h_color_xadj(c + 1);
+                  nnz_lno_t overall_work = color_index_end - color_index_begin;
                   gs._color_set_begin = color_index_begin;
                   gs._color_set_end = color_index_end;
                   Kokkos::parallel_for("KokkosSparse::GaussSeidel::Team_PSGS::forward",
                                        cugraph.team_policy((overall_work + gs._clusters_per_team - 1) / gs._clusters_per_team, team_size, vec_size),
                                        gs);
-                  if (i == 0){
+                  if (c == 0){
                     break;
                   }
                 }
@@ -1197,18 +1196,17 @@ namespace KokkosSparse{
           bool apply_forward,
           bool apply_backward)
       {
-        ClusterGaussSeidelHandle* handle = get_gs_handle();
-        auto& cugraph = handle->get_apply_cuda_graph();
+        auto& cugraph = get_gs_handle()->get_apply_cuda_graph();
         if(cugraph.begin_recording(gs._Xvector, gs._Yvector, num_iteration, apply_forward, apply_backward))
         {
-          for (int i = 0; i < num_iteration; ++i)
+          for (int iter = 0; iter < num_iteration; iter++)
           {
             if (apply_forward)
             {
-              for (color_t i = 0; i < numColors; ++i)
+              for (color_t c = 0; c < numColors; c++)
               {
-                nnz_lno_t color_index_begin = h_color_xadj(i);
-                nnz_lno_t color_index_end = h_color_xadj(i + 1);
+                nnz_lno_t color_index_begin = h_color_xadj(c);
+                nnz_lno_t color_index_end = h_color_xadj(c + 1);
                 gs._color_set_begin = color_index_begin;
                 gs._color_set_end = color_index_end;
                 Kokkos::parallel_for ("KokkosSparse::GaussSeidel::PSGS::forward",
@@ -1218,16 +1216,16 @@ namespace KokkosSparse{
             }
             if (apply_backward && numColors)
             {
-              for (size_type i = numColors - 1; ; --i)
+              for (size_type c = numColors - 1; ; c--)
               {
-                nnz_lno_t color_index_begin = h_color_xadj(i);
-                nnz_lno_t color_index_end = h_color_xadj(i + 1);
+                nnz_lno_t color_index_begin = h_color_xadj(c);
+                nnz_lno_t color_index_end = h_color_xadj(c + 1);
                 gs._color_set_begin = color_index_begin;
                 gs._color_set_end = color_index_end;
                 Kokkos::parallel_for ("KokkosSparse::GaussSeidel::PSGS::backward",
                     cugraph.template range_policy<PSGS_BackwardTag>
                     (0, color_index_end - color_index_begin), gs);
-                if (i == 0){
+                if (c == 0){
                   break;
                 }
               }
