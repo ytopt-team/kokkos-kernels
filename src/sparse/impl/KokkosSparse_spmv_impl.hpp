@@ -390,6 +390,7 @@ static void spmv_beta_no_transpose(
     const YVector& y) {
   typedef typename AMatrix::non_const_ordinal_type ordinal_type;
   typedef typename AMatrix::execution_space execution_space;
+  auto context = Kokkos::Tools::Experimental::get_new_context_id();
 
   if (A.numRows() <= static_cast<ordinal_type>(0)) {
     return;
@@ -504,10 +505,39 @@ static void spmv_beta_no_transpose(
     int64_t rows_per_thread = -1;
     using FunctorType =
         SPMV_Functor<AMatrix, XVector, YVector, dobeta, conjugate>;
-    using TunerType = SPMVTuner<FunctorType, execution_space>;
-    static TunerType* tuner;
+    using TeamTunerType            = Kokkos::Tools::Experimental::TeamSizeTuner;
+    using RowsPerThreadOptionsType = std::vector<int64_t>;
+    using SPMVTunerType = decltype(std::declval<TeamTunerType>().combine(
+        "", std::declval<RowsPerThreadOptionsType>()));
+    static SPMVTunerType* tuner;
+    static size_t rows_id;
+    static size_t nnz_id;
+    static std::vector<int64_t> rows_per_thread_options {
+      1,2,4,8,16,32,64,128,256,1024,2048,4096
+    };
     if (tuner == nullptr) {
-      tuner = new TunerType(alpha, A, x, beta, y, 1);
+
+      std::cout << "Building a tuner\n";
+      using CalculatorType =
+          Kokkos::Tools::Impl::Impl::SimpleTeamSizeCalculator;
+      Kokkos::TeamPolicy<execution_space, Kokkos::Schedule<Kokkos::Dynamic>>
+          strawman(1, Kokkos::AUTO, Kokkos::AUTO);
+      TeamTunerType team_tuner(
+          "kokkos.kernels.spmv_tuner", strawman,
+          SPMV_Functor<AMatrix, XVector, YVector, dobeta, conjugate>{
+              alpha, A, x, beta, y, 1},
+          Kokkos::ParallelForTag{}, CalculatorType{});
+      Kokkos::Tools::Experimental::VariableInfo info;
+      info.valueQuantity = Kokkos::Tools::Experimental::CandidateValueType::
+          kokkos_value_unbounded;
+      info.category =
+          Kokkos::Tools::Experimental::StatisticalCategory::kokkos_value_ratio;
+      info.type = Kokkos::Tools::Experimental::ValueType::kokkos_value_int64;
+      rows_id   = Kokkos::Tools::Experimental::declare_input_type(
+          "kokkos.kernels.spmv.rows", info);
+      nnz_id = Kokkos::Tools::Experimental::declare_input_type(
+          "kokkos.kernels.spmv.nnz", info);
+      tuner = new SPMVTunerType(team_tuner.combine("kokkos.kernels.rows_per_thread", rows_per_thread_options));
     }
     // Note on 03/24/20, lbv: We can use the controls
     // here to allow the user to pass in some tunning
@@ -521,7 +551,12 @@ static void spmv_beta_no_transpose(
     if (controls.isParameter("rows per thread")) {
       rows_per_thread = std::stoll(controls.getParameter("rows per thread"));
     }
-    auto config           = tuner->begin(A.numRows(), A.nnz());
+    Kokkos::Tools::Experimental::begin_context(context);
+    Kokkos::Tools::Experimental::VariableValue spmv_values[] {
+      Kokkos::Tools::Experimental::make_variable_value(rows_id,int64_t(A.numRows())),
+      Kokkos::Tools::Experimental::make_variable_value(nnz_id,int64_t(A.nnz()))
+    };
+    auto config           = tuner->begin();
     vector_length         = std::get<0>(config);
     team_size             = std::get<1>(config);
     rows_per_thread       = std::get<2>(config);
@@ -577,6 +612,7 @@ static void spmv_beta_no_transpose(
                               Kokkos::Schedule<Kokkos::Static>>(0, A.numRows()),
           func);
   }
+  Kokkos::Tools::Experimental::end_context(context);
 }
 
 template <class AMatrix, class XVector, class YVector, int dobeta,
