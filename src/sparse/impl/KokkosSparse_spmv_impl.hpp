@@ -503,6 +503,14 @@ static void spmv_beta_no_transpose(
     int team_size           = -1;
     int vector_length       = -1;
     int64_t rows_per_thread = -1;
+
+    /** Tuning block
+     * The tuning problem of SPMV is that we have to choose a team size, a vector length,
+     * and a number of rows per thread. Team size and vector length are handled by a
+     * Kokkos construct called the TeamSizeTuner. Notably, the integrated Kokkos tuners
+     * allow you to combine another axis with them. So we take a TeamSizeTuner, and mix
+     * in our rows_per_thread variable.
+     */
     using FunctorType =
         SPMV_Functor<AMatrix, XVector, YVector, dobeta, conjugate>;
     using TeamTunerType            = Kokkos::Tools::Experimental::TeamSizeTuner;
@@ -516,8 +524,6 @@ static void spmv_beta_no_transpose(
       1,2,4,8,16,32,64,128,256,1024,2048,4096
     };
     if (tuner == nullptr) {
-
-      std::cout << "Building a tuner\n";
       using CalculatorType =
           Kokkos::Tools::Impl::Impl::SimpleTeamSizeCalculator;
       Kokkos::TeamPolicy<execution_space, Kokkos::Schedule<Kokkos::Dynamic>>
@@ -552,14 +558,20 @@ static void spmv_beta_no_transpose(
       rows_per_thread = std::stoll(controls.getParameter("rows per thread"));
     }
     Kokkos::Tools::Experimental::begin_context(context);
+    // tell the tool about our numRows and nnz values
     Kokkos::Tools::Experimental::VariableValue spmv_values[] {
       Kokkos::Tools::Experimental::make_variable_value(rows_id,int64_t(A.numRows())),
       Kokkos::Tools::Experimental::make_variable_value(nnz_id,int64_t(A.nnz()))
     };
+    // request a configuration, which is a tuple of rows_per_thread, team_size, and vector_length
+    Kokkos::Tools::Experimental::set_input_values(context, 2, spmv_values);
     auto config           = tuner->begin();
-    vector_length         = std::get<0>(config);
+    rows_per_thread       = std::get<0>(config);
     team_size             = std::get<1>(config);
-    rows_per_thread       = std::get<2>(config);
+    vector_length         = std::get<2>(config);
+    //std::cout << "Got params " << vector_length << ", " <<team_size<< ", " <<rows_per_thread<< ", " << std::endl;
+
+
     int64_t rows_per_team = spmv_launch_parameters<execution_space>(
         A.numRows(), A.nnz(), rows_per_thread, team_size, vector_length);
     int64_t worksets = (y.extent(0) + rows_per_team - 1) / rows_per_team;
@@ -595,6 +607,7 @@ static void spmv_beta_no_transpose(
       Kokkos::parallel_for("KokkosSparse::spmv<NoTranspose,Static>", policy,
                            func);
     }
+    tuner->end();
   } else {
     SPMV_Functor<AMatrix, XVector, YVector, dobeta, conjugate> func(alpha, A, x,
                                                                     beta, y, 1);
