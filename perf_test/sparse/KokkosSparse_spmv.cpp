@@ -230,6 +230,16 @@ int test_crs_matrix_singlevec(Ordinal numRows, Ordinal numCols, int test, const 
     Kokkos::fence();
     double time = timer.seconds();
     ave_time += time;
+    Kokkos::deep_copy(h_y,y1);
+    Scalar error = 0;
+    Scalar sum = 0;
+    for(int i=0;i<numRows;i++) {
+
+      error += (h_y_compare(i)-h_y(i))*(h_y_compare(i)-h_y(i));
+      sum += h_y_compare(i)*h_y_compare(i);
+    }
+    total_error += error;
+
     if(time>max_time) max_time = time;
     if(time<min_time) min_time = time;
   }
