@@ -224,9 +224,11 @@ int test_crs_matrix_singlevec(Ordinal numRows, Ordinal numCols, int test, const 
   double min_time = 1.0e32;
   double max_time = 0.0;
   double ave_time = 0.0;
+  decltype(y1) y1_c;
+  Kokkos::deep_copy(y1_c, y1);
   for(int i=0;i<loop;i++) {
+    Kokkos::deep_copy(y1, y1_c);
     Kokkos::Timer timer;
-    Kokkos::deep_copy(y1,99.99);
     matvec(A,x1,y1,rows_per_thread,team_size,vector_length,test,schedule);
     Kokkos::fence();
     double time = timer.seconds();
