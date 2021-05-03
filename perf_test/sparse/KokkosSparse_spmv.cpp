@@ -84,7 +84,7 @@ typedef default_layout Layout;
 
 template<typename AType, typename XType, typename YType>
 void matvec(AType& A, XType x, YType y, Ordinal rows_per_thread, int team_size, int vector_length, int test, int schedule) {
-
+        test = KK_KERNELS;
         switch(test) {
 
         case KOKKOS:
