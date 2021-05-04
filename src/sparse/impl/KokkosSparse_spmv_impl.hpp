@@ -241,7 +241,8 @@ struct SPMV_Functor {
     set_input_values(context, 2, tuning_values);
     begin_context(context);
     auto config = tuning_util->tuner->begin();
-    func(std::get<0>(config), std::get<1>(config), std::get<2>(config));
+    func(-1, std::get<1>(config), std::get<2>(config));
+    //func(-1, std::get<1>(config), std::get<2>(config));
     tuning_util->tuner->end();
     end_context(context);
     }
